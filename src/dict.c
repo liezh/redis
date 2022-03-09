@@ -212,18 +212,23 @@ int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     if (!dictIsRehashing(d)) return 0;
 
+    // 主循环，对n个桶进行rehash，因为是渐进式rehash，所以每次只rehash n个桶，做完就收工；
+    // 等下一次业务系统请求再来或者定时器调用时，再把把剩余的桶rehash，长命功夫长命做，化整为零；
+    // 这样主线程就每次做一点，不会阻塞很长时间。
     while(n-- && d->ht_used[0] != 0) {
         dictEntry *de, *nextde;
 
         /* Note that rehashidx can't overflow as we are sure there are more
          * elements because ht[0].used != 0 */
         assert(DICTHT_SIZE(d->ht_size_exp[0]) > (unsigned long)d->rehashidx);
+        // 如果当前要迁移的桶（bucket）中没有元素，就看下一个
         while(d->ht_table[0][d->rehashidx] == NULL) {
             d->rehashidx++;
-            if (--empty_visits == 0) return 1;
+            if (--empty_visits == 0) return 1; // 最多看n个空桶，如果都是空就结束
         }
         de = d->ht_table[0][d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
+        // 迁移这个桶下所有的数据，到ht[1]的新桶上
         while(de) {
             uint64_t h;
 
@@ -241,14 +246,15 @@ int dictRehash(dict *d, int n) {
     }
 
     /* Check if we already rehashed the whole table... */
+    // 如果rehash完成
     if (d->ht_used[0] == 0) {
-        zfree(d->ht_table[0]);
+        zfree(d->ht_table[0]); // 回收旧map的内存
         /* Copy the new ht onto the old one */
-        d->ht_table[0] = d->ht_table[1];
+        d->ht_table[0] = d->ht_table[1];  // 置换rehash的map回ht[0]的位置
         d->ht_used[0] = d->ht_used[1];
         d->ht_size_exp[0] = d->ht_size_exp[1];
-        _dictReset(d, 1);
-        d->rehashidx = -1;
+        _dictReset(d, 1); // 重置
+        d->rehashidx = -1; // 设置rehash标志为完成，没有进行rehash
         return 0;
     }
 
